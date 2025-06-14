@@ -11,9 +11,9 @@ PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 
 @app.get("/")
 async def root():
-    return {"message": "WhatsApp Echo Bot is running"}
+    return {"message": "WhatsApp Echo Bot is running on Vercel"}
 
-@app.get("/webhook")
+@app.get("/api/webhook")
 async def verify_webhook(request: Request):
     """Verify webhook for WhatsApp"""
     mode = request.query_params.get("hub.mode")
@@ -24,7 +24,7 @@ async def verify_webhook(request: Request):
         return int(challenge)
     return "Verification failed"
 
-@app.post("/webhook")
+@app.post("/api/webhook")
 async def handle_message(request: Request):
     """Handle incoming messages and echo them back"""
     try:
@@ -76,6 +76,5 @@ async def send_message(to_number: str, message: str):
     except Exception as e:
         print(f"Send error: {e}")
 
-# if __name__ == "__main__":
-#     import uvicorn
-#     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+# This is important for Vercel
+handler = app
