@@ -9,10 +9,6 @@ WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN") 
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 
-@app.get("/")
-async def root():
-    return {"message": "WhatsApp Echo Bot is running on Vercel"}
-
 @app.get("/api/webhook")
 async def verify_webhook(request: Request):
     """Verify webhook for WhatsApp"""
@@ -76,5 +72,6 @@ async def send_message(to_number: str, message: str):
     except Exception as e:
         print(f"Send error: {e}")
 
-# This is important for Vercel
-handler = app
+# Vercel handler
+def handler(request):
+    return app(request)
