@@ -66,6 +66,6 @@ async def send_message(to_number: str, message: str):
     async with httpx.AsyncClient() as client:
         await client.post(url, json=data, headers=headers)
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+# if __name__ == "__main__":
+    # import uvicorn
+    # uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
