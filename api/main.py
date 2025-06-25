@@ -1,22 +1,26 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 import requests
 import os
 import google.generativeai as genai
-import io
-import base64
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
 app = FastAPI()
 
-# WhatsApp Cloud API credentials
+# --- Configuration ---
+# Load environment variables for security
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
-
-# Google Gemini API credentials
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# --- Error Handling for Configuration ---
+if not all([WHATSAPP_TOKEN, PHONE_NUMBER_ID, VERIFY_TOKEN, GEMINI_API_KEY]):
+    raise ValueError("One or more environment variables are missing. Please check your configuration.")
+
+# --- Configure Google Gemini API ---
 genai.configure(api_key=GEMINI_API_KEY)
 
-# System prompt for dental clinic
+# --- System Prompt (Unchanged) ---
 DENTAL_CLINIC_SYSTEM_PROMPT = """
 أنت مساعد مفيد لعيادة "سمايل كير للأسنان" الموجودة في القاهرة، مصر. أنت تساعد المرضى في المواعيد والمعلومات عن الخدمات والأسئلة العامة عن صحة الأسنان.
 
@@ -76,172 +80,159 @@ EGYPTIAN ARABIC UNDERSTANDING:
 Important Note: You cannot actually book appointments - you only provide information and guide patients on how to book.
 """
 
+# --- FastAPI Endpoints ---
+
 @app.get("/")
 async def health_check():
     return {"status": "WhatsApp Dental Clinic Bot is running"}
 
 @app.get("/webhook")
 async def verify_webhook(request: Request):
+    """
+    Verifies the webhook subscription with Meta.
+    """
     mode = request.query_params.get("hub.mode")
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
     
     if mode == "subscribe" and token == VERIFY_TOKEN:
+        print("Webhook verified successfully!")
         return int(challenge)
-    return {"error": "Verification failed"}
+    
+    print("Webhook verification failed.")
+    raise HTTPException(status_code=403, detail="Verification failed")
 
 @app.post("/webhook")
 async def handle_webhook(request: Request):
+    """
+    Handles incoming messages from WhatsApp.
+    """
     data = await request.json()
     
-    if data.get("object") == "whatsapp_business_account":
-        for entry in data.get("entry", []):
-            for change in entry.get("changes", []):
-                if change.get("field") == "messages":
-                    messages = change.get("value", {}).get("messages", [])
-                    for message in messages:
-                        sender_phone = message.get("from")
-                        message_text = ""
-                        
-                        # Handle text messages
-                        if message.get("type") == "text":
-                            message_text = message.get("text", {}).get("body")
-                        
-                        # Handle voice messages
-                        elif message.get("type") == "audio":
-                            audio_id = message.get("audio", {}).get("id")
-                            if audio_id:
-                                # Download and convert voice to text
-                                message_text = await process_voice_message(audio_id)
-                                if not message_text:
-                                    send_message(sender_phone, "عذراً، لم أتمكن من فهم الرسالة الصوتية. من فضلك أرسل رسالة نصية أو اتصل بالعيادة على +20 2 1234-5678")
-                                    continue
-                        
-                        # Process the message if we have text
-                        if message_text:
-                            # Get response from Gemini
-                            gemini_response = get_gemini_response(message_text)
+    try:
+        if data.get("object") == "whatsapp_business_account":
+            for entry in data.get("entry", []):
+                for change in entry.get("changes", []):
+                    if change.get("field") == "messages":
+                        messages = change.get("value", {}).get("messages", [])
+                        for message in messages:
+                            sender_phone = message.get("from")
+                            msg_type = message.get("type")
                             
-                            # Send Gemini response back to user
-                            send_message(sender_phone, gemini_response)
+                            gemini_response = None
+                            
+                            if msg_type == "text":
+                                message_text = message.get("text", {}).get("body")
+                                if message_text:
+                                    # Get response for text message
+                                    gemini_response = get_gemini_response(user_message=message_text)
+                            
+                            # --- NEW: Handle Audio Messages ---
+                            elif msg_type == "audio":
+                                audio_id = message.get("audio", {}).get("id")
+                                if audio_id:
+                                    # 1. Get audio bytes from WhatsApp
+                                    audio_bytes, mime_type = get_audio_from_whatsapp(audio_id)
+                                    if audio_bytes and mime_type:
+                                        # 2. Get response from Gemini using audio
+                                        gemini_response = get_gemini_response(audio_bytes=audio_bytes, mime_type=mime_type)
+                                    else:
+                                        gemini_response = "Sorry, I couldn't process the voice note. Please try again or type your message."
+
+                            # If we have a response, send it
+                            if gemini_response:
+                                send_message(sender_phone, gemini_response)
+    except Exception as e:
+        print(f"Error handling webhook: {e}")
+        # It's good practice to still return a 200 OK to WhatsApp
+        # to prevent them from resending the webhook.
     
     return {"status": "ok"}
 
-async def process_voice_message(audio_id):
-    """Download voice message and send to Gemini for transcription"""
-    try:
-        # Step 1: Get audio file URL from WhatsApp
-        audio_url = get_media_url(audio_id)
-        if not audio_url:
-            return None
-        
-        # Step 2: Download the audio file
-        audio_data = download_media(audio_url)
-        if not audio_data:
-            return None
-        
-        # Step 3: Send audio directly to Gemini for transcription
-        transcribed_text = transcribe_with_gemini(audio_data)
-        return transcribed_text
-        
-    except Exception as e:
-        print(f"Error processing voice message: {e}")
-        return None
 
-def get_media_url(media_id):
-    """Get the download URL for a WhatsApp media file"""
+# --- NEW: Function to get audio from WhatsApp ---
+def get_audio_from_whatsapp(audio_id: str):
+    """
+    Fetches audio file bytes from WhatsApp servers in memory.
+    Args:
+        audio_id: The media ID of the audio file.
+    Returns:
+        A tuple of (audio_bytes, mime_type) or (None, None) if an error occurs.
+    """
+    # 1. Get the media URL from Meta
+    url_get_media = f"https://graph.facebook.com/v20.0/{audio_id}"
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}"}
+    
     try:
-        url = f"https://graph.facebook.com/v23.0/{media_id}"
-        headers = {
-            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        }
+        media_info_response = requests.get(url_get_media, headers=headers)
+        media_info_response.raise_for_status() # Raise an exception for bad status codes
+        media_url = media_info_response.json().get("url")
+        mime_type = media_info_response.json().get("mime_type")
+
+        if not media_url:
+            print("Error: Media URL not found in response.")
+            return None, None
+
+        # 2. Download the actual audio file bytes
+        audio_response = requests.get(media_url, headers=headers)
+        audio_response.raise_for_status()
         
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            data = response.json()
-            return data.get("url")
+        print(f"Successfully fetched audio. Size: {len(audio_response.content)} bytes. Mime-type: {mime_type}")
+        return audio_response.content, mime_type
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching audio from WhatsApp: {e}")
+        return None, None
+
+
+# --- MODIFIED: Gemini function to handle both text and audio ---
+def get_gemini_response(user_message: str = None, audio_bytes: bytes = None, mime_type: str = None):
+    """
+    Gets a response from Gemini, handling either a text message or audio bytes.
+    """
+    try:
+        # Use a model that supports multimodal input, like gemini-1.5-flash
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        
+        # This prompt is added to guide the model when it receives audio
+        audio_prompt = "The user has sent a voice note. Please transcribe it and then respond to their query as the helpful dental assistant, following all instructions. The audio is in Egyptian Arabic."
+        
+        # Prepare the content for Gemini
+        content_parts = [DENTAL_CLINIC_SYSTEM_PROMPT]
+        
+        if audio_bytes and mime_type:
+            content_parts.append(audio_prompt)
+            content_parts.append({"mime_type": mime_type, "data": audio_bytes})
+        elif user_message:
+            content_parts.append(f"User: {user_message}\n\nAssistant:")
         else:
-            print(f"Failed to get media URL: {response.text}")
-            return None
-            
-    except Exception as e:
-        print(f"Error getting media URL: {e}")
-        return None
+            return "Error: No user message or audio provided."
 
-def download_media(media_url):
-    """Download media file from WhatsApp"""
-    try:
-        headers = {
-            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        }
-        
-        response = requests.get(media_url, headers=headers)
-        if response.status_code == 200:
-            return response.content
-        else:
-            print(f"Failed to download media: {response.status_code}")
-            return None
-            
-    except Exception as e:
-        print(f"Error downloading media: {e}")
-        return None
-
-def transcribe_with_gemini(audio_data):
-    """Use Gemini to transcribe audio data"""
-    try:
-        # Convert audio data to base64
-        audio_base64 = base64.b64encode(audio_data).decode('utf-8')
-        
-        # Initialize the model
-        model = genai.GenerativeModel('gemini-1.5-pro')
-        
-        # Create audio part for Gemini
-        audio_part = {
-            "mime_type": "audio/ogg",  # WhatsApp sends audio as OGG
-            "data": audio_base64
-        }
-        
-        # Create prompt for transcription
-        prompt = """
-        Please transcribe this audio message. The speaker is likely speaking in Egyptian Arabic or English.
-        Return only the transcribed text without any additional commentary.
-        If you cannot understand the audio, return "TRANSCRIPTION_FAILED".
-        """
-        
-        # Generate transcription
-        response = model.generate_content([prompt, audio_part])
-        
-        transcription = response.text.strip()
-        
-        # Check if transcription failed
-        if "TRANSCRIPTION_FAILED" in transcription:
-            return None
-            
-        return transcription
-        
-    except Exception as e:
-        print(f"Error transcribing with Gemini: {e}")
-        return None
-
-def get_gemini_response(user_message):
-    try:
-        # Initialize the model
-        model = genai.GenerativeModel('gemini-2.0-flash-exp')
-        
-        # Create the conversation with system prompt
-        full_prompt = f"{DENTAL_CLINIC_SYSTEM_PROMPT}\n\nUser: {user_message}\n\nAssistant:"
-        
         # Generate response
-        response = model.generate_content(full_prompt)
+        response = model.generate_content(
+            content_parts,
+            # Adding safety settings to reduce chances of the model refusing to answer
+            safety_settings={
+                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+            }
+        )
         
         return response.text
     
     except Exception as e:
         print(f"Error getting Gemini response: {e}")
-        return "Sorry, I'm having trouble processing your request right now. Please call our clinic at +20 2 1234-5678 for immediate assistance."
+        # A generic but safe fallback message
+        return "آسف، حدث خطأ أثناء معالجة طلبك. يرجى محاولة مرة أخرى أو الاتصال بالعيادة مباشرة على +20 2 1234-5678 للمساعدة الفورية.\nSorry, I encountered an error. Please try again or call our clinic directly at +20 2 1234-5678 for immediate assistance."
 
-def send_message(to_phone, message_text):
-    url = f"https://graph.facebook.com/v23.0/{PHONE_NUMBER_ID}/messages"
+# --- Unchanged Helper Function ---
+def send_message(to_phone: str, message_text: str):
+    """
+    Sends a text message to a user via the WhatsApp Cloud API.
+    """
+    url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
     headers = {
         "Authorization": f"Bearer {WHATSAPP_TOKEN}",
         "Content-Type": "application/json"
@@ -257,7 +248,8 @@ def send_message(to_phone, message_text):
     
     try:
         response = requests.post(url, json=payload, headers=headers)
-        if response.status_code != 200:
-            print(f"Failed to send message: {response.text}")
-    except Exception as e:
-        print(f"Error sending message: {e}")
+        response.raise_for_status()
+        print(f"Message sent successfully to {to_phone}")
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to send message: {e}")
+        print(f"Response body: {e.response.text if e.response else 'No response'}")
