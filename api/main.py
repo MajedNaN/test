@@ -105,14 +105,14 @@ async def handle_webhook(request: Request):
                         if message.get("type") == "text":
                             message_text = message.get("text", {}).get("body")
                         
-                        # Handle voice messages
-                        elif message.get("type") == "audio":
-                            audio_id = message.get("audio", {}).get("id")
-                            if audio_id:
-                                message_text = transcribe_audio(audio_id)
-                                if not message_text:
-                                    send_message(sender_phone, "عذراً، لم أتمكن من فهم الرسالة الصوتية. يرجى المحاولة مرة أخرى أو إرسال رسالة نصية.\n\nSorry, I couldn't understand the voice message. Please try again or send a text message.")
-                                    continue
+                        # # Handle voice messages
+                        # elif message.get("type") == "audio":
+                        #     audio_id = message.get("audio", {}).get("id")
+                        #     if audio_id:
+                        #         message_text = transcribe_audio(audio_id)
+                        #         if not message_text:
+                        #             send_message(sender_phone, "عذراً، لم أتمكن من فهم الرسالة الصوتية. يرجى المحاولة مرة أخرى أو إرسال رسالة نصية.\n\nSorry, I couldn't understand the voice message. Please try again or send a text message.")
+                        #             continue
                         
                         # Process the message if we have text
                         if message_text:
