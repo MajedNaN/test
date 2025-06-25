@@ -2,6 +2,8 @@ from fastapi import FastAPI, Request
 import requests
 import os
 import google.generativeai as genai
+import io
+import base64
 
 app = FastAPI()
 
@@ -105,7 +107,15 @@ async def handle_webhook(request: Request):
                         if message.get("type") == "text":
                             message_text = message.get("text", {}).get("body")
                         
-                       
+                        # Handle voice messages
+                        elif message.get("type") == "audio":
+                            audio_id = message.get("audio", {}).get("id")
+                            if audio_id:
+                                # Download and convert voice to text
+                                message_text = await process_voice_message(audio_id)
+                                if not message_text:
+                                    send_message(sender_phone, "عذراً، لم أتمكن من فهم الرسالة الصوتية. من فضلك أرسل رسالة نصية أو اتصل بالعيادة على +20 2 1234-5678")
+                                    continue
                         
                         # Process the message if we have text
                         if message_text:
@@ -117,6 +127,101 @@ async def handle_webhook(request: Request):
     
     return {"status": "ok"}
 
+async def process_voice_message(audio_id):
+    """Download voice message and send to Gemini for transcription"""
+    try:
+        # Step 1: Get audio file URL from WhatsApp
+        audio_url = get_media_url(audio_id)
+        if not audio_url:
+            return None
+        
+        # Step 2: Download the audio file
+        audio_data = download_media(audio_url)
+        if not audio_data:
+            return None
+        
+        # Step 3: Send audio directly to Gemini for transcription
+        transcribed_text = transcribe_with_gemini(audio_data)
+        return transcribed_text
+        
+    except Exception as e:
+        print(f"Error processing voice message: {e}")
+        return None
+
+def get_media_url(media_id):
+    """Get the download URL for a WhatsApp media file"""
+    try:
+        url = f"https://graph.facebook.com/v23.0/{media_id}"
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        }
+        
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            data = response.json()
+            return data.get("url")
+        else:
+            print(f"Failed to get media URL: {response.text}")
+            return None
+            
+    except Exception as e:
+        print(f"Error getting media URL: {e}")
+        return None
+
+def download_media(media_url):
+    """Download media file from WhatsApp"""
+    try:
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        }
+        
+        response = requests.get(media_url, headers=headers)
+        if response.status_code == 200:
+            return response.content
+        else:
+            print(f"Failed to download media: {response.status_code}")
+            return None
+            
+    except Exception as e:
+        print(f"Error downloading media: {e}")
+        return None
+
+def transcribe_with_gemini(audio_data):
+    """Use Gemini to transcribe audio data"""
+    try:
+        # Convert audio data to base64
+        audio_base64 = base64.b64encode(audio_data).decode('utf-8')
+        
+        # Initialize the model
+        model = genai.GenerativeModel('gemini-1.5-pro')
+        
+        # Create audio part for Gemini
+        audio_part = {
+            "mime_type": "audio/ogg",  # WhatsApp sends audio as OGG
+            "data": audio_base64
+        }
+        
+        # Create prompt for transcription
+        prompt = """
+        Please transcribe this audio message. The speaker is likely speaking in Egyptian Arabic or English.
+        Return only the transcribed text without any additional commentary.
+        If you cannot understand the audio, return "TRANSCRIPTION_FAILED".
+        """
+        
+        # Generate transcription
+        response = model.generate_content([prompt, audio_part])
+        
+        transcription = response.text.strip()
+        
+        # Check if transcription failed
+        if "TRANSCRIPTION_FAILED" in transcription:
+            return None
+            
+        return transcription
+        
+    except Exception as e:
+        print(f"Error transcribing with Gemini: {e}")
+        return None
 
 def get_gemini_response(user_message):
     try:
@@ -156,4 +261,3 @@ def send_message(to_phone, message_text):
             print(f"Failed to send message: {response.text}")
     except Exception as e:
         print(f"Error sending message: {e}")
-
