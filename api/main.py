@@ -105,14 +105,7 @@ async def handle_webhook(request: Request):
                         if message.get("type") == "text":
                             message_text = message.get("text", {}).get("body")
                         
-                        # # Handle voice messages
-                        # elif message.get("type") == "audio":
-                        #     audio_id = message.get("audio", {}).get("id")
-                        #     if audio_id:
-                        #         message_text = transcribe_audio(audio_id)
-                        #         if not message_text:
-                        #             send_message(sender_phone, "عذراً، لم أتمكن من فهم الرسالة الصوتية. يرجى المحاولة مرة أخرى أو إرسال رسالة نصية.\n\nSorry, I couldn't understand the voice message. Please try again or send a text message.")
-                        #             continue
+                       
                         
                         # Process the message if we have text
                         if message_text:
@@ -124,106 +117,6 @@ async def handle_webhook(request: Request):
     
     return {"status": "ok"}
 
-def transcribe_audio(audio_id):
-    """
-    Download and transcribe WhatsApp audio message using Google Gemini
-    """
-    try:
-        # Step 1: Get audio file URL from WhatsApp
-        media_url = get_media_url(audio_id)
-        if not media_url:
-            return None
-        
-        # Step 2: Download the audio file
-        audio_content = download_media(media_url)
-        if not audio_content:
-            return None
-        
-        # Step 3: Save audio temporarily (Vercel-compatible approach)
-        import tempfile
-        import os
-        
-        # Create temporary file in /tmp directory (works on Vercel)
-        temp_dir = "/tmp"
-        temp_filename = f"audio_{audio_id}.ogg"
-        temp_audio_path = os.path.join(temp_dir, temp_filename)
-        
-        # Write audio content to temp file
-        with open(temp_audio_path, 'wb') as temp_file:
-            temp_file.write(audio_content)
-        
-        # Step 4: Convert audio to text using Gemini
-        try:
-            # Upload file to Gemini
-            audio_file = genai.upload_file(temp_audio_path)
-            
-            # Use Gemini to transcribe
-            model = genai.GenerativeModel('gemini-2.0-flash-exp')
-            response = model.generate_content([
-                "Please transcribe this audio message accurately. The audio is likely in Arabic (Egyptian dialect) or English. Provide only the transcription without any additional commentary.",
-                audio_file
-            ])
-            
-            transcription = response.text.strip()
-            
-            # Clean up temp file
-            if os.path.exists(temp_audio_path):
-                os.unlink(temp_audio_path)
-            
-            return transcription
-            
-        except Exception as e:
-            print(f"Error transcribing with Gemini: {e}")
-            # Clean up temp file on error
-            if os.path.exists(temp_audio_path):
-                os.unlink(temp_audio_path)
-            return None
-            
-    except Exception as e:
-        print(f"Error in transcribe_audio: {e}")
-        return None
-
-def get_media_url(media_id):
-    """
-    Get the download URL for a WhatsApp media file
-    """
-    try:
-        url = f"https://graph.facebook.com/v23.0/{media_id}"
-        headers = {
-            "Authorization": f"Bearer {WHATSAPP_TOKEN}"
-        }
-        
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            data = response.json()
-            return data.get("url")
-        else:
-            print(f"Failed to get media URL: {response.text}")
-            return None
-            
-    except Exception as e:
-        print(f"Error getting media URL: {e}")
-        return None
-
-def download_media(media_url):
-    """
-    Download media file from WhatsApp
-    """
-    try:
-        headers = {
-            "Authorization": f"Bearer {WHATSAPP_TOKEN}"
-        }
-        
-        response = requests.get(media_url, headers=headers)
-        if response.status_code == 200:
-            return response.content
-        else:
-            print(f"Failed to download media: {response.status_code}")
-            return None
-            
-    except Exception as e:
-        print(f"Error downloading media: {e}")
-        return None
 
 def get_gemini_response(user_message):
     try:
