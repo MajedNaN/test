@@ -152,7 +152,7 @@ def get_whatsapp_media_bytes(media_id: str):
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}"}
     
     # 1. Get Media URL
-    url_get_media_info = f"https://graph.facebook.com/v20.0/{media_id}"
+    url_get_media_info = f"https://graph.facebook.com/v23.0/{media_id}"
     try:
         media_info = requests.get(url_get_media_info, headers=headers).json()
         media_url = media_info["url"]
