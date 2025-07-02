@@ -11,7 +11,6 @@
 #   "messaging_product": "whatsapp",
 #   "pin": "012340"
 # }'
-
 from fastapi import FastAPI, Request, HTTPException
 import requests
 import os
@@ -93,49 +92,53 @@ async def handle_webhook(request: Request):
     try:
         # Check if the message is a valid WhatsApp message
         if data.get("object") and data.get("entry"):
-            # Navigate through the nested structure to get the message details
-            # This path might vary slightly based on the exact WhatsApp webhook payload
-            # Adding checks for existence of keys
-            if data["entry"] and data["entry"][0].get("changes") and \
-               data["entry"][0]["changes"][0].get("value") and \
-               data["entry"][0]["changes"][0]["value"].get("messages"):
+            for entry in data["entry"]:
+                for change in entry.get("changes", []):
+                    if change.get("field") == "messages" and change.get("value"):
+                        value = change["value"]
+                        # Ensure the message is for the correct phone number ID
+                        if str(value.get("metadata", {}).get("phone_number_id")) != str(PHONE_NUMBER_ID):
+                            print(f"Ignoring message for different phone number ID: {value.get('metadata', {}).get('phone_number_id')}")
+                            continue
 
-                message = data["entry"][0]["changes"][0]["value"]["messages"][0]
-                sender_phone = message["from"]
-                msg_type = message["type"]
+                        for message in value.get("messages", []):
+                            sender_phone = message["from"]
+                            msg_type = message["type"]
+                            
+                            gemini_input = []
 
-                gemini_input = []
+                            if msg_type == "text":
+                                user_text = message["text"]["body"]
+                                # Prepare input for Gemini
+                                gemini_input = [
+                                    DENTAL_CLINIC_SYSTEM_PROMPT,
+                                    f"User message: \"{user_text}\""
+                                ]
+                            
+                            elif msg_type == "audio":
+                                audio_id = message["audio"]["id"]
+                                # Get audio data directly from WhatsApp's servers
+                                audio_bytes, mime_type = get_whatsapp_media_bytes(audio_id)
 
-                if msg_type == "text":
-                    user_text = message["text"]["body"]
-                    # Prepare input for Gemini
-                    gemini_input = [
-                        DENTAL_CLINIC_SYSTEM_PROMPT,
-                        f"User message: \"{user_text}\""
-                    ]
-                
-                elif msg_type == "audio":
-                    audio_id = message["audio"]["id"]
-                    # Get audio data directly from WhatsApp's servers
-                    audio_bytes, mime_type = get_whatsapp_media_bytes(audio_id)
-
-                    if audio_bytes:
-                        # Prepare input for Gemini with the audio file
-                        gemini_input = [
-                            DENTAL_CLINIC_SYSTEM_PROMPT,
-                            "The user sent a voice note. Transcribe it, understand the request, and answer in Egyptian Arabic based on the clinic's information. Make the response concise.",
-                            {"mime_type": mime_type, "data": audio_bytes}
-                        ]
-                    else:
-                        # If audio download fails, send an error message
-                        send_message(sender_phone, "معلش، مقدرتش أسمع الرسالة الصوتية. ممكن تبعتها تاني أو تكتب سؤالك؟")
-                        return {"status": "ok"}
-                
-                if gemini_input:
-                    # Get the response from Gemini
-                    response_text = get_gemini_response(gemini_input)
-                    # Send the response back to the user
-                    send_message(sender_phone, response_text)
+                                if audio_bytes:
+                                    # Prepare input for Gemini with the audio file
+                                    gemini_input = [
+                                        DENTAL_CLINIC_SYSTEM_PROMPT,
+                                        "The user sent a voice note. Transcribe it, understand the request, and answer in Egyptian Arabic based on the clinic's information. Make the response concise.",
+                                        {"mime_type": mime_type, "data": audio_bytes}
+                                    ]
+                                else:
+                                    # If audio download fails, send an error message
+                                    send_message(sender_phone, "معلش، مقدرتش أسمع الرسالة الصوتية. ممكن تبعتها تاني أو تكتب سؤالك؟")
+                                    # Continue to the next message if audio download failed for this one
+                                    continue
+                            
+                            # Only process if there's valid input for Gemini
+                            if gemini_input:
+                                # Get the response from Gemini
+                                response_text = get_gemini_response(gemini_input)
+                                # Send the response back to the user
+                                send_message(sender_phone, response_text)
 
     except Exception as e:
         print(f"Error handling webhook: {e}")
