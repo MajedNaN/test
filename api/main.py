@@ -97,19 +97,13 @@ async def handle_webhook(request: Request):
         # Check if the message is a valid WhatsApp message
         if data.get("object") and data.get("entry"):
             # Navigate through the nested structure to get the message details
+            # This path might vary slightly based on the exact WhatsApp webhook payload
+            # Adding checks for existence of keys
             if data["entry"] and data["entry"][0].get("changes") and \
                data["entry"][0]["changes"][0].get("value") and \
                data["entry"][0]["changes"][0]["value"].get("messages"):
 
-                value = data["entry"][0]["changes"][0]["value"]
-
-                # ✅ Extract phone_number_id for validation
-                incoming_phone_number_id = value.get("metadata", {}).get("phone_number_id")
-                if incoming_phone_number_id != PHONE_NUMBER_ID:
-                    print(f"Ignoring message for phone_number_id: {incoming_phone_number_id}")
-                    return {"status": "ignored"}
-
-                message = value["messages"][0]
+                message = data["entry"][0]["changes"][0]["value"]["messages"][0]
                 sender_phone = message["from"]
                 msg_type = message["type"]
 
@@ -148,6 +142,7 @@ async def handle_webhook(request: Request):
 
     except Exception as e:
         print(f"Error handling webhook: {e}")
+        # Optionally, send a generic error message back to the user if an unexpected error occurs
         # send_message(sender_phone, "آسف، حصل خطأ غير متوقع. يرجى المحاولة مرة أخرى لاحقًا.")
 
     return {"status": "ok"}
