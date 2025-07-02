@@ -3,7 +3,14 @@
 
 
 
-
+# curl 'https://graph.facebook.com/v23.0/754730247713324/register' \
+# -H 'Content-Type: application/json' \
+# -H 'Authorization: Bearer EAAU0mJLom4ABOyXHeCN5AP7r3OpLIsMgbC1OGm01DWtepbo3kyIA1BrGFt9W44RDVZA4wZCzEWU2YQToC3mFZBMpSXghI13iF9pBeJ66DD52nVQNxkfnLLiXvaoh5s49i5xKyKRAuSvy0ZA9LlZCwVUWuu2u7eUnppItCVmZAPU0o4W4HlKYjJt9ymrVzZCZAAZDZD' \
+# -d '
+# {
+#   "messaging_product": "whatsapp",
+#   "pin": "012340"
+# }'
 
 from fastapi import FastAPI, Request, HTTPException
 import requests
@@ -183,7 +190,7 @@ def get_gemini_response(input_parts: list):
 
 def send_message(to_phone: str, message_text: str):
     """ Sends a text message back to the user on WhatsApp """
-    url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
+    url = f"https://graph.facebook.com/v23.0/{PHONE_NUMBER_ID}/messages"
     headers = {
         "Authorization": f"Bearer {WHATSAPP_TOKEN}",
         "Content-Type": "application/json"
