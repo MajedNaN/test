@@ -1,6 +1,8 @@
 
 ###### for whatsapp
 
+###############################################################
+# https://developers.facebook.com/docs/whatsapp/cloud-api/reference/registration/
 
 
 # curl 'https://graph.facebook.com/v23.0/754730247713324/register' \
@@ -12,9 +14,17 @@
 #   "pin": "012340"
 # }'
 
+##########################################################
+### https://developers.facebook.com/docs/graph-api/webhooks/getting-started/webhooks-for-whatsapp/#delete-a-subscription
+# curl 'https://graph.facebook.com/v23.0/1282202593562435/subscribed_apps' \
+# -H 'Authorization: Bearer EAAU0mJLom4ABOyXHeCN5AP7r3OpLIsMgbC1OGm01DWtepbo3kyIA1BrGFt9W44RDVZA4wZCzEWU2YQToC3mFZBMpSXghI13iF9pBeJ66DD52nVQNxkfnLLiXvaoh5s49i5xKyKRAuSvy0ZA9LlZCwVUWuu2u7eUnppItCVmZAPU0o4W4HlKYjJt9ymrVzZCZAAZDZD'
 
+# curl -X POST 'https://graph.facebook.com/v23.0/1263925568577782/subscribed_apps' \
+# -H 'Authorization: Bearer EAAU0mJLom4ABOyXHeCN5AP7r3OpLIsMgbC1OGm01DWtepbo3kyIA1BrGFt9W44RDVZA4wZCzEWU2YQToC3mFZBMpSXghI13iF9pBeJ66DD52nVQNxkfnLLiXvaoh5s49i5xKyKRAuSvy0ZA9LlZCwVUWuu2u7eUnppItCVmZAPU0o4W4HlKYjJt9ymrVzZCZAAZDZD'
 
-
+# curl -X DELETE 'https://graph.facebook.com/<AP_VERSION>/<WHATSAPP_BUSINESS_ACCOUNT_ID>/subscribed_apps' \
+# -H 'Authorization: Bearer EAAU0mJLom4ABOyXHeCN5AP7r3OpLIsMgbC1OGm01DWtepbo3kyIA1BrGFt9W44RDVZA4wZCzEWU2YQToC3mFZBMpSXghI13iF9pBeJ66DD52nVQNxkfnLLiXvaoh5s49i5xKyKRAuSvy0ZA9LlZCwVUWuu2u7eUnppItCVmZAPU0o4W4HlKYjJt9ymrVzZCZAAZDZD'
+###########################################################################
 from fastapi import FastAPI, Request, HTTPException
 import requests
 import os
